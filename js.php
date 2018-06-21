@@ -15,7 +15,7 @@
 		var stack = [],stackI = 0, selfFunction = null;
 		
 		
-	var variableParent,used,opcode = [];
+	var freevars=[],used,opcode = [];
 		opcode[1] = function()
 		{
 			--stackI;
@@ -103,13 +103,13 @@
 		{
 			stack[--stackI-1] =  stack[stackI-1]/stack[stackI];
 		}
-		opcode[54] = function() // store map
+		/*opcode[54] = function() // store map
 		{
 			a1 = func.popVar();
 			a2 = func.popVar();
 			storeMap[a1] = a2;
 			func.pushVar(storeMap);
-		}
+		}*/
 		opcode[55] = function() // a+=1 INPLACE_ADD
 		{
 			stack[--stackI-1] =  stack[stackI-1]+stack[stackI];
@@ -140,45 +140,33 @@
 		}
 		opcode[62] = function() // <<
 		{
-			a1 = func.popVar();
-			a2 = func.popVar();
-			func.pushVar(a2<<a1);
+			stack[--stackI-1] =  stack[stackI-1]<<stack[stackI];
 		}
 		opcode[63] = function() // >>
 		{
-			a1 = func.popVar();
-			a2 = func.popVar();
-			func.pushVar(a2>>a1);
+			stack[--stackI-1] =  stack[stackI-1]>>stack[stackI];
 		}
 		opcode[64] = function() // &
 		{
-			a1 = func.popVar();
-			a2 = func.popVar();
-			func.pushVar(a2&a1);
+			stack[--stackI-1] =  stack[stackI-1]&stack[stackI];
 		}
 		opcode[65] = function() // ^
 		{
-			a1 = func.popVar();
-			a2 = func.popVar();
-			func.pushVar(a2^a1);
+			stack[--stackI-1] =  stack[stackI-1]^stack[stackI];
 		}
 		opcode[66] = function() // |
 		{
-			a1 = func.popVar();
-			a2 = func.popVar();
-			func.pushVar(a2|a1);
+			stack[--stackI-1] =  stack[stackI-1]|stack[stackI];
 		}
 		opcode[67] = function() //** INPLACE
 		{
-			a1 = func.popVar();
-			a2 = func.popVar();
-			func.pushVar(Math.pow(a2,a1));
+			stack[--stackI-1] =  Math.pow(stack[stackI-1],stack[stackI]);
 		}
-		opcode[68] = function() // GET_ITER
+		/*opcode[68] = function() // GET_ITER
 		{
-			a1 = func.popVar();
-			func.pushForinter([0,a1.length,a1]);
-		}
+			a = stack[--stackI];
+			func.pushForinter([0,a.length,a]);
+		}*/
 		opcode[71] = function() // LOAD_BUILD_CLASS
 		{
 			func.pushVar({});
@@ -274,10 +262,10 @@
 		}
 		opcode[102] = function() // BUILD_TUPLE
 		{
-			a1 = func.getInt();
+			a1 = used.code[used.i];
 			a2 = [];
-			while(a1--) a2[a1] = func.popVar();
-			func.pushVar(a2);
+			while(a1--) a2[a1] = stack[--stackI];
+			stack[stackI++] = a2;
 		}
 		opcode[103] = function() // GEN Array
 		{
@@ -357,7 +345,8 @@
 		}
 		opcode[116] = function() // LOAD_GLOBAL
 		{
-			func.pushVar(func.getVariable());
+			//func.pushVar(func.getVariable());
+			stack[stackI++] = globalData[used.name[used.code[used.i]]];
 		}
 		opcode[120] = function() // SETUP_LOOP
 		{
@@ -366,11 +355,13 @@
 		}
 		opcode[124] = function() // LOAD_FAST
 		{
-			func.pushVar(func.getVariableLocal());
+			//func.pushVar(func.getVariableLocal());
+			stack[stackI++] = used.var[used.code[used.i]];
 		}
 		opcode[125] = function() // STORE_FAST
 		{
-			func.setVariableLocal(func.popVar());
+			//func.setVariableLocal(func.popVar());
+			used.var[used.code[used.i]] = stack[--stackI];
 		}
 		opcode[131] = function() // CALL_FUNCTION
 		{
@@ -394,7 +385,28 @@
 		}
 		opcode[132] = function() // MAKE_FUNCTION
 		{
-			func.makeFunction();
+			var name = stack[--stackI];
+			var bin = stack[--stackI];
+			var oparg = used.code[used.i];
+			
+			if(oparg & 0x08)
+			{
+              //  assert(PyTuple_CheckExact(TOP()));
+               // func ->func_closure = POP();
+            }
+            if (oparg & 0x04) {
+               // assert(PyDict_CheckExact(TOP()));
+               // func->func_annotations = POP();
+            }
+            if (oparg & 0x02) {
+               // assert(PyDict_CheckExact(TOP()));
+                //func->func_kwdefaults = POP();
+            }
+            if (oparg & 0x01) {
+                //assert(PyTuple_CheckExact(TOP()));
+                //func->func_defaults = POP();
+            }
+			stack[stackI++] = bin;
 		}
 		opcode[133] = function() // BUILD_SLICE
 		{
@@ -420,16 +432,15 @@
 		}
 		opcode[135] = function() // LOAD_CLOSURE
 		{
-			alert(func.getInt());
+			stack[stackI++] = freevars[used.code[used.i]];
 		}
 		opcode[136] = function() // LOAD_DEREF
 		{
-			func.pushVar(variableParent[func.getInt()]);
-			
+			stack[stackI++] = freevars[used.code[used.i]];
 		}
 		opcode[137] = function() // STORE_DEREF
 		{
-			variableParent[func.getInt()] = func.popVar();
+			freevars[used.code[used.i]] = stack[--stackI];
 		}
 		
 		var globalData = 
@@ -517,8 +528,8 @@
 				console.error("Error compile program!");
 				return false;
 			}
-			var local = BCode[3],code = BCode[2], variablesLocal = {}, varLocI = 0, ret;
-			while(varLocI < args.length)variablesLocal[local[varLocI]] = args[varLocI++];
+			var local = BCode[3],code = BCode[2], variablesLocal = [], varLocI = 0, ret;
+			while(varLocI < args.length)variablesLocal[varLocI] = args[varLocI++];
 			var arrayLocal = [],arrayLocalI = 0;
 			
 			function pushVarLocal(v)
@@ -537,6 +548,7 @@
 				,l:code.length
 				,code:code
 				,local:local
+				,var:variablesLocal
 				,name:BCode[0]
 				,cnst:BCode[1]
 				,context:null
